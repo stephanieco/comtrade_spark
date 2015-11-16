@@ -1,0 +1,271 @@
+//####################################################
+//indicators of graphs by bec classes and during time#
+//####################################################
+//9/11/2015
+
+//note that I filter with flow=1 but this is not totally accurate
+//I don't take into account weights 
+//=> to be discussed
+
+//Hive request (for memory):
+//select year, bec, flow, reporter, partner, sum(tradevalue)
+//from annual_hs_bec 
+//where not partner=reporter and not partner=0 and not reporter=0
+//group by year, bec, reporter, flow, partner
+
+//first graph year=2000 and bec=111 and flow=1
+
+import org.apache.spark.SparkContext
+import org.apache.spark.graphx._
+import org.apache.spark.rdd.RDD
+
+val sqlContext= new org.apache.spark.sql.hive.HiveContext(sc)
+
+//variables for loops
+val bec= List("7","21","22","31","32","41","42","51","53","61","62","63","111","112","121","122","322","521","522")
+val class_number=bec.length
+
+//variable with result
+import Array._
+var Matrix_res = ofDim[Float](285,29) //285=15years*19classes, 19 col year/bec/nodes/edges/density/degree*4*3/component*2
+
+for(i <- 5 to 13){
+for(j <- 0 to (class_number-1)){
+
+Matrix_res(19*i+j)(0)=(2000+i)
+Matrix_res(19*i+j)(1)=bec(j).toInt.toFloat
+
+val data = sqlContext.sql("select reporter, partner from annual_hs_bec_sc where year="+(2000+i)+" and flow=2 and bec="+bec(j)).collect()
+
+val couples= data.map(line => (line(0),line(1)))
+
+val edges: RDD[(VertexId, VertexId)] = sc.parallelize(couples
+  .map{case (x: String, y: String) => (x.toString.toLong, y.toString.toLong)}
+)
+
+val comtradeGraph = Graph.fromEdgeTuples(edges,1)
+
+//#################
+//Graph indicators#
+//#################
+
+//#################################
+//basics
+comtradeGraph.vertices.count()
+edges.count();
+Matrix_res(19*i+j)(2) = comtradeGraph.vertices.count()
+Matrix_res(19*i+j)(3) = edges.count()
+
+//#################################
+//density : edges/ nodes^2
+
+import scala.math.pow
+val density = edges.count().toFloat / pow(comtradeGraph.vertices.count(),2).intValue
+println(density)
+Matrix_res(14*i+j)(4) = density
+
+//#################################
+//degree distribution 
+
+val degrees: VertexRDD[Int] = comtradeGraph.degrees.cache()
+val degrees_stat = degrees.map(_._2).stats()
+Matrix_res(19*i+j)(5) = degrees_stat.mean.toFloat
+Matrix_res(19*i+j)(6) = degrees_stat.stdev.toFloat
+Matrix_res(19*i+j)(7) = degrees_stat.max.toFloat
+Matrix_res(19*i+j)(8) = degrees_stat.min.toFloat
+
+val inDegrees: VertexRDD[Int] = comtradeGraph.inDegrees.cache()
+val inDegrees_stat = inDegrees.map(_._2).stats()
+Matrix_res(19*i+j)(9) = inDegrees_stat.mean.toFloat
+Matrix_res(19*i+j)(10) = inDegrees_stat.stdev.toFloat
+Matrix_res(19*i+j)(11) = inDegrees_stat.max.toFloat
+Matrix_res(19*i+j)(12) = inDegrees_stat.min.toFloat
+
+val outDegrees: VertexRDD[Int] = comtradeGraph.outDegrees.cache()
+val outDegrees_stat = outDegrees.map(_._2).stats()
+Matrix_res(19*i+j)(13) = outDegrees_stat.mean.toFloat
+Matrix_res(19*i+j)(14) = outDegrees_stat.stdev.toFloat
+Matrix_res(19*i+j)(15) = outDegrees_stat.max.toFloat
+Matrix_res(19*i+j)(16) = outDegrees_stat.min.toFloat
+
+//#################################
+//connexity : graph components (are all the vertices connected even indirectly ?)
+//equivalent to connectedComponentGraph ?
+//=> algorithm mecanism has to be studied
+
+val connectedComponentGraph: Graph[VertexId, Int] = comtradeGraph.connectedComponents()
+
+//In order to get a count of the number of connected components and their size, we can use the countByValue method against the VertexId values for each vertex in the  VertexRDD .
+
+def sortedConnectedComponents(connectedComponents: Graph[VertexId, _]): Seq[(VertexId, Long)] = {//take a graph of components, returns a seq of index of one vertex by component and frequencies
+val componentCounts = connectedComponents.vertices.map(_._2).
+countByValue //(4 -> 227)
+componentCounts.toSeq.sortBy(_._2).reverse //order with frequency .toSeq -> ArrayBuffer((4,227)), order with the second element and reverse the order
+}
+
+val componentCounts = sortedConnectedComponents(connectedComponentGraph)//applying the function we just defined to our graph of components 
+componentCounts.size
+//number of components
+Matrix_res(19*i+j)(17) = componentCounts.size
+
+componentCounts.take(10)foreach(println)
+//frequencies in communities
+
+val stronglyConnectedComponentGraph: Graph[VertexId, Int] = comtradeGraph.stronglyConnectedComponents(50)//numIter
+Matrix_res(19*i+j)(18) = sortedConnectedComponents(stronglyConnectedComponentGraph).size
+
+//#################################
+//PageRank
+val rank = comtradeGraph.pageRank(0.001).vertices.sortBy(_._2).map(x => x._1.toFloat).take(10)
+for(k <- 0 to 9){
+Matrix_res(19*i+j)(19+k) =rank(k)
+}
+
+}//end loop bec
+sc.parallelize(Matrix_res.map{case u => u.mkString(",")}).saveAsTextFile("Matrix_dimg_flow2"+i) 
+}//end loop year
+
+//export
+sc.parallelize(Matrix_res.map{case u => u.mkString(",")}).saveAsTextFile("Matrix_res_flow2") 
+
+
+
+//hive request to get the data out 
+create external table indicators_spark0_8 (
+  year int,
+  bec string,
+  vertices int,
+  edges int,
+  density double,
+  degree_mean double,
+  degree_std double,
+  degree_max int,
+  degree_min int,
+  indegree_mean double,
+  indegree_std double,
+  indegree_max int,
+  indegree_min int,
+  outdegree_mean double,
+  outdegree_std double,
+  outdegree_max int,
+  outdegree_min int,
+  components int,
+  strong_components int,
+  rank1 int,
+  rank2 int,
+  rank3 int,
+  rank4 int,
+  rank5 int,
+  rank6 int,
+  rank7 int,
+  rank8 int,
+  rank9 int,
+  rank10 int 
+) 
+row format delimited 
+fields terminated by ',' 
+lines terminated by '\n' 
+stored as textfile location '/user/stephanie/temp_res/Matrix_dimg8';
+
+stored as textfile location '/user/stephanie/temp_res/Matrix_dimg14';
+
+
+//!!!!!DOES NOT WORK!!!!
+//#################################
+//transitivity (small world) : probability that two connected nodes to another are connected together 
+//has to be used inside a component!
+
+val triCountGraph = comtradeGraph.triangleCount()
+triCountGraph.vertices.map(x => x._2).stats()
+
+//To compute the local clustering coefficient, we’ll need to normalize these triangle countsby the total number of possible triangles at each vertex, which we can compute from the  degrees RDD: 
+val maxTrisGraph = comtradeGraph.degrees.mapValues(d => d * (d - 1) / 2.0)
+
+//Now we’ll join the  VertexRDD of triangle counts from  triCountGraph to the  VertexRDD of normalization terms we calculated and compute the ratio of the two, being careful to avoid dividing by zero for any vertices that only have a single edge
+
+val clusterCoefGraph = triCountGraph.vertices.
+innerJoin(maxTrisGraph) { (vertexId, triCount, maxTris) => {
+if (maxTris == 0) 0 else triCount / maxTris
+}
+}
+
+//Computing the average value of the local clustering coefficient for all of the vertices in the graph gives us the network average clustering coefficient:
+clusterCoefGraph.map(_._2).sum() / comtradeGraph.vertices.count()
+
+
+//Annex, not really tested so far 
+//##################################
+//small-world : The second property of small-world networks is that the length of the shortest path between any two randomly chosen nodes tends to be small. 
+//=> to be discussed
+
+
+def mergeMaps(m1: Map[VertexId, Int], m2: Map[VertexId, Int])
+: Map[VertexId, Int] = {
+def minThatExists(k: VertexId): Int = {
+math.min(
+m1.getOrElse(k, Int.MaxValue),
+m2.getOrElse(k, Int.MaxValue))
+}
+(m1.keySet ++ m2.keySet).map {
+k => (k, minThatExists(k))
+}.toMap
+}
+
+def update(
+id: VertexId,
+state: Map[VertexId, Int],
+msg: Map[VertexId, Int]) = {
+mergeMaps(state, msg)
+}
+
+def checkIncrement(
+a: Map[VertexId, Int],
+b: Map[VertexId, Int],
+bid: VertexId) = {
+val aplus = a.map { case (v, d) => v -> (d + 1) }
+if (b != mergeMaps(aplus, b)) {
+Iterator((bid, aplus))
+} else {
+Iterator.empty
+}
+}
+
+def iterate(e: EdgeTriplet[Map[VertexId, Int], _]) = {
+checkIncrement(e.srcAttr, e.dstAttr, e.dstId) ++
+checkIncrement(e.dstAttr, e.srcAttr, e.srcId)
+}
+
+
+val fraction = 0.02
+val replacement = false
+val sample = comtradeGraph.vertices.map(v => v._1).
+sample(replacement, fraction, 1729L)
+val ids = sample.collect().toSet
+
+val mapGraph = comtradeGraph.mapVertices((id, _) => {
+if (ids.contains(id)) {
+Map(id -> 0)
+} else {
+Map[VertexId, Int]()
+}
+})
+
+
+val start = Map[VertexId, Int]()
+val res = mapGraph.pregel(start)(update, iterate, mergeMaps)
+
+val paths = res.vertices.flatMap { case (id, m) =>
+m.map { case (k, v) =>
+if (id < k) {
+(id, k, v)
+} else {
+(k, id, v)
+}
+}
+}.distinct()
+paths.cache()
+
+paths.map(_._3).filter(_ > 0).stats()
+
+val hist = paths.map(_._3).countByValue()
+hist.toSeq.sorted.foreach(println)
