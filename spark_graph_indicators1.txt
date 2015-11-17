@@ -116,7 +116,7 @@ Matrix_res(19*i+j)(18) = sortedConnectedComponents(stronglyConnectedComponentGra
 
 //#################################
 //PageRank
-val rank = comtradeGraph.pageRank(0.001).vertices.sortBy(_._2).map(x => x._1.toFloat).take(10)
+val rank = comtradeGraph.pageRank(0.001).vertices.sortBy(_._2).map(x => x._1.toFloat).toArray.reverse.take(10)
 for(k <- 0 to 9){
 Matrix_res(19*i+j)(19+k) =rank(k)
 }
@@ -178,10 +178,10 @@ stored as textfile location '/user/stephanie/temp_res/Matrix_dimg14';
 val triCountGraph = comtradeGraph.triangleCount()
 triCountGraph.vertices.map(x => x._2).stats()
 
-//To compute the local clustering coefficient, we’ll need to normalize these triangle countsby the total number of possible triangles at each vertex, which we can compute from the  degrees RDD: 
+//To compute the local clustering coefficient, weâ€™ll need to normalize these triangle countsby the total number of possible triangles at each vertex, which we can compute from the  degrees RDD: 
 val maxTrisGraph = comtradeGraph.degrees.mapValues(d => d * (d - 1) / 2.0)
 
-//Now we’ll join the  VertexRDD of triangle counts from  triCountGraph to the  VertexRDD of normalization terms we calculated and compute the ratio of the two, being careful to avoid dividing by zero for any vertices that only have a single edge
+//Now weâ€™ll join the  VertexRDD of triangle counts from  triCountGraph to the  VertexRDD of normalization terms we calculated and compute the ratio of the two, being careful to avoid dividing by zero for any vertices that only have a single edge
 
 val clusterCoefGraph = triCountGraph.vertices.
 innerJoin(maxTrisGraph) { (vertexId, triCount, maxTris) => {
