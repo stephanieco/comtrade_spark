@@ -116,7 +116,7 @@ Matrix_res(19*i+j)(18) = sortedConnectedComponents(stronglyConnectedComponentGra
 
 //#################################
 //PageRank
-val rank = comtradeGraph.pageRank(0.001).vertices.sortBy(_._2).map(x => x._1.toFloat).take(10)
+val rank = comtradeGraph.pageRank(0.001).vertices.sortBy(_._2).map(x => x._1.toFloat).toArray.reverse.take(10)
 for(k <- 0 to 9){
 Matrix_res(19*i+j)(19+k) =rank(k)
 }

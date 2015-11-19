@@ -1,0 +1,76 @@
+import org.apache.spark.SparkContext
+import org.apache.spark.graphx._
+import org.apache.spark.rdd.RDD
+
+val sqlContext= new org.apache.spark.sql.hive.HiveContext(sc)
+
+//variables for loops
+val bec= List("7","21","22","31","32","41","42","51","53","61","62","63","111","112","121","122","322","521","522")
+val class_number=bec.length
+
+//variable with result
+import Array._
+var Matrix_res = ofDim[Float](136724,5) //flow/year/bec/country/pagerank
+
+var line=0
+
+var flow=2
+for(i <- 0 to 13){
+for(j <- 0 to (class_number-1)){
+
+val data = sqlContext.sql("select reporter, partner from annual_hs_bec_sc where year="+(2000+i)+" and flow="+flow+" and bec="+bec(j)).collect()
+
+val couples= data.map(line => (line(0),line(1)))
+
+val edges: RDD[(VertexId, VertexId)] = sc.parallelize(couples
+  .map{case (x: String, y: String) => (x.toString.toLong, y.toString.toLong)}
+)
+
+val comtradeGraph = Graph.fromEdgeTuples(edges,1)
+
+val nbvertices = comtradeGraph.vertices.count().toInt
+
+//#################################
+//PageRank
+val rank = comtradeGraph.pageRank(0.001).vertices.sortBy(_._2).toArray
+val kmax = (nbvertices-1)
+for(k <- 0 to kmax){
+Matrix_res(line+k)(0) = flow.toFloat
+Matrix_res(line+k)(1) = (2000+i).toFloat
+Matrix_res(line+k)(2) = bec(j).toInt.toFloat
+Matrix_res(line+k)(3) = rank(k)._1.toFloat
+Matrix_res(line+k)(4) = rank(k)._2.toFloat
+}
+
+line+= nbvertices //on ne redefinit pas la variable donc on n'utilise pas var/val
+
+}//end loop bec
+sc.parallelize(Matrix_res.map{case u => u.mkString(",")}).saveAsTextFile("rank_year_bec_flow2"+i) 
+}//end loop year
+
+//export
+sc.parallelize(Matrix_res.map{case u => u.mkString(",")}).saveAsTextFile("rank_year_bec_flow") 
+
+
+
+//hive request to get the data out 
+create external table rank_year_bec_flow (
+  flow int,
+  year int,
+  bec int,
+  country int,
+  rank float
+) 
+row format delimited 
+fields terminated by ',' 
+lines terminated by '\n' 
+stored as textfile location '/user/stephanie/rank_year_bec_flow213';
+
+CREATE TABLE rank_year_bec_flowtempb AS SELECT * FROM ( SELECT *
+FROM rank_year_bec_flowtemp_1 UNION ALL
+SELECT *
+FROM rank_year_bec_flowtemp_2 ) rank_year_bec_flow;
+
+CREATE TABLE rank_year_bec_flowVFb AS select * from rank_year_bec_flowtempb where not year=0
+
+select count(*) from rank_year_bec_flowVFb
