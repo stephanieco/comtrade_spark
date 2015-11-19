@@ -66,11 +66,9 @@ fields terminated by ','
 lines terminated by '\n' 
 stored as textfile location '/user/stephanie/rank_year_bec_flow213';
 
-CREATE TABLE rank_year_bec_flowtempb AS SELECT * FROM ( SELECT *
-FROM rank_year_bec_flowtemp_1 UNION ALL
-SELECT *
-FROM rank_year_bec_flowtemp_2 ) rank_year_bec_flow;
 
-CREATE TABLE rank_year_bec_flowVFb AS select * from rank_year_bec_flowtempb where not year=0
+create table rank_year_bec_flowdef as select * from rank_year_bec_flowtemp_1 where not year=0;
+insert into table rank_year_bec_flowdef select * from rank_year_bec_flowtemp_2 where not year=0;
+insert into table rank_year_bec_flowdef select * from rank_year_bec_flow where not year=0;
 
-select count(*) from rank_year_bec_flowVFb
+select count(*) from rank_year_bec_flowdef
